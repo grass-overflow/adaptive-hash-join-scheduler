@@ -35,7 +35,7 @@ All figures below are formatted using classic academic research standards (clean
 ### Figure 1: Join Throughput and End-to-End Latency vs. Zipfian Skew ($z$)
 Evaluates join throughput in million tuples per second (top row) and execution time in milliseconds (bottom row) across Zipfian skew factors $z \in [0.0, 1.75]$ for Large ($|R|=250\text{k}, |S|=4\text{M}$) and Medium ($|R|=80\text{k}, |S|=1.28\text{M}$) datasets.
 
-![Figure 1: Throughput and End-to-End Latency](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig1_throughput_and_latency.png)
+![Figure 1: Throughput and End-to-End Latency](results/academic_plots/fig1_throughput_and_latency.png)
 
 *Observations:*
 - At low skew ($z \le 0.75$), all three policies perform closely because partition sizes are relatively uniform.
@@ -46,7 +46,7 @@ Evaluates join throughput in million tuples per second (top row) and execution t
 ### Figure 2: Speedup vs. Sequential Baseline and Worker Load Imbalance ($\lambda$)
 Subplot (a) shows the speedup factor relative to the sequential unpartitioned hash join reference. Subplot (b) plots the worker load imbalance ratio $\lambda = \frac{\max \text{worker rows}}{\text{avg worker rows}}$.
 
-![Figure 2: Speedup and Worker Imbalance](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig2_speedup_and_imbalance.png)
+![Figure 2: Speedup and Worker Imbalance](results/academic_plots/fig2_speedup_and_imbalance.png)
 
 *Observations:*
 - **Root Cause of Static Failure:** Static Coarse scheduling assigns partitions round-robin. At $z=1.75$, the largest partition holds $522\times$ the average row count, driving worker imbalance $\lambda$ up to **3.96** (one worker processes 4x the average workload while other threads sit idle at the OpenMP barrier).
@@ -57,7 +57,7 @@ Subplot (a) shows the speedup factor relative to the sequential unpartitioned ha
 ### Figure 3: Task Granularity Explosion and Probe Phase Latency
 Subplot (a) shows the total number of tasks dispatched (log scale). Subplot (b) shows the actual time spent in the probe and match phase.
 
-![Figure 3: Task Granularity and Probe Latency](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig3_task_granularity_and_probe.png)
+![Figure 3: Task Granularity and Probe Latency](results/academic_plots/fig3_task_granularity_and_probe.png)
 
 *Observations:*
 - **Root Cause of Fine-Grained Dynamic Failure:** The Balkesen et al. baseline blindly divides oversized partitions into fixed 256-row slices, exploding task count to **15,498 tasks**.
@@ -69,7 +69,7 @@ Subplot (a) shows the total number of tasks dispatched (log scale). Subplot (b) 
 ### Figure 4: Confirmatory 8-Seed Evaluation at Extreme Skew ($z=1.75$)
 Multi-run confirmatory benchmarks conducted across 8 independent pseudorandom seeds (56 individual join runs per scheduler). Error bars indicate repetition standard deviation ($\pm 1\sigma$).
 
-![Figure 4: Confirmatory 8-Seed Evaluation](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig4_confirmatory_high_skew.png)
+![Figure 4: Confirmatory 8-Seed Evaluation](results/academic_plots/fig4_confirmatory_high_skew.png)
 
 *Statistical Confirmation:*
 - **Large Workload ($|R|=250\text{k}, |S|=4\text{M}$):**
@@ -87,7 +87,7 @@ Multi-run confirmatory benchmarks conducted across 8 independent pseudorandom se
 ### Figure 5: Adaptive Work-Stealing Dynamics and Microsecond Overhead Breakdown
 Subplot (a) tracks steal attempts, successful task steals, and batched steals. Subplot (b) breaks down scheduling overhead into cost estimation, task planning, and queue administration in microseconds ($\mu$s).
 
-![Figure 5: Stealing Dynamics and Overhead](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig5_stealing_dynamics_and_overhead.png)
+![Figure 5: Stealing Dynamics and Overhead](results/academic_plots/fig5_stealing_dynamics_and_overhead.png)
 
 *Observations:*
 - Under low skew ($z=0$), zero steals occur because local deques are naturally balanced.
@@ -99,7 +99,7 @@ Subplot (a) tracks steal attempts, successful task steals, and batched steals. S
 ### Figure 6: Parallel Efficiency and Execution Phase Breakdown
 Subplot (a) shows parallel efficiency $E = \frac{\text{Speedup}}{p} \times 100\%$ ($p=4$). Subplot (b) shows the stacked execution phase breakdown at $z=1.75$ (Partitioning, Build, Probe, Scheduling Overhead).
 
-![Figure 6: Parallel Efficiency and Phase Breakdown](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig6_parallel_efficiency_and_phase_breakdown.png)
+![Figure 6: Parallel Efficiency and Phase Breakdown](results/academic_plots/fig6_parallel_efficiency_and_phase_breakdown.png)
 
 *Observations:*
 - **Parallel Efficiency:** Novelty sustains **59.0%** parallel efficiency at $z=1.40$ (vs 46.1% for Static and 46.2% for Fine-Grained), and **45.3%** at $z=1.75$ (vs 36.5% and 38.2%).
@@ -129,22 +129,22 @@ To directly assess multi-threaded scalability on modern SMT architectures, an ex
 ### 8-Thread Figures
 
 #### Figure 1 (8 Threads): Throughput, Cycles/Tuple, Latency, and Relative Gain
-![Figure 1 (8 Threads)](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig1_throughput_and_latency_8threads.png)
+![Figure 1 (8 Threads)](results/academic_plots/fig1_throughput_and_latency_8threads.png)
 
 #### Figure 2 (8 Threads): Speedup vs Sequential Reference and Worker Imbalance ($\lambda$)
-![Figure 2 (8 Threads)](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig2_speedup_and_imbalance_8threads.png)
+![Figure 2 (8 Threads)](results/academic_plots/fig2_speedup_and_imbalance_8threads.png)
 
 #### Figure 3 (8 Threads): Task Count Explosion and Probe Phase Latency
-![Figure 3 (8 Threads)](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig3_task_granularity_and_probe_8threads.png)
+![Figure 3 (8 Threads)](results/academic_plots/fig3_task_granularity_and_probe_8threads.png)
 
 #### Figure 4: 4-Thread vs. 8-Thread Scaling Across Skew Spectrum
-![Figure 4: 4-Thread vs 8-Thread Scaling](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig4_4threads_vs_8threads_comparison.png)
+![Figure 4: 4-Thread vs 8-Thread Scaling](results/academic_plots/fig4_4threads_vs_8threads_comparison.png)
 
 #### Figure 5 (8 Threads): Confirmatory Bar Chart at Extreme Skew ($z=1.75$)
-![Figure 5 (8 Threads)](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig5_8thread_confirmation_bar.png)
+![Figure 5 (8 Threads)](results/academic_plots/fig5_8thread_confirmation_bar.png)
 
 #### Figure 6 (8 Threads): Worker Load Distribution (Static Straggler vs. Novelty Balance)
-![Figure 6 (8 Threads)](C:/Users/rohit/.gemini/antigravity-ide/brain/99bb28f3-4920-4578-ae4e-788907b4c6c7/academic_plots/fig6_8thread_worker_distribution.png)
+![Figure 6 (8 Threads)](results/academic_plots/fig6_8thread_worker_distribution.png)
 
 ### 8-Thread Quantitative Data Table ($|R|=250\text{k}, |S|=4\text{M}$)
 
