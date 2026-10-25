@@ -1,0 +1,10 @@
+{
+  "cost_samples": 16,
+  "queue_batch_size": 1,
+  "min_target_skew_gain_pct": -0.8813793122845753,
+  "mean_target_skew_gain_pct": -0.8055471131934977,
+  "gain_z075_pct": -4.296916534428757,
+  "gain_z14_pct": -0.8813793122845753,
+  "gain_z175_pct": -0.7297149141024201,
+  "seeds_per_skew": 3
+}

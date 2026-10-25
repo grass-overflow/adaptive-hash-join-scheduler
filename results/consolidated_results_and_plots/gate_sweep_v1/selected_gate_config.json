@@ -1,0 +1,10 @@
+{
+  "steal_threshold_multiplier": 4.0,
+  "min_gain_over_all_peers_z14_z175_pct": -0.9281093811864115,
+  "mean_gain_over_all_peers_z14_z175_pct": 5.830447327485795,
+  "z14_gain_vs_budgeted_pct": -0.10107766428029571,
+  "z175_gain_vs_budgeted_pct": 3.013561215841675,
+  "z14_gain_vs_ungated_pct": 1.343301254129213,
+  "z175_gain_vs_ungated_pct": -0.06577128342560819,
+  "seeds_per_skew": 3
+}

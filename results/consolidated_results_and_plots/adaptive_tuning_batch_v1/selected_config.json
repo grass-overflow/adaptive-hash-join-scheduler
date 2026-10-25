@@ -1,0 +1,11 @@
+{
+  "chunk_size": 1024,
+  "tasks_per_thread": 32,
+  "split_factor": 2.5,
+  "queue_batch_size": 16,
+  "min_gain_vs_strongest_pct": -0.5213095326853437,
+  "mean_gain_vs_strongest_pct": -0.046053946641933574,
+  "gain_z075_pct": -0.5213095326853437,
+  "gain_z14_pct": -0.2594638115537407,
+  "gain_z175_pct": 0.6426115043132837
+}

@@ -1,0 +1,12 @@
+r_size,s_size,threads,skew,comparison,baseline,candidate,independent_seeds,mean_paired_gain_pct,positive_seeds,ci95_low_pct,ci95_high_pct,baseline_median_s,candidate_median_s,candidate_wins_every_seed
+1,4,4,0.0,budget_only,paper_fine_grained,novelty_budgeted,1,0.3449019185169184,1,0.3449019185169184,0.3449019185169184,0.0004639,0.0004623,1
+1,4,4,0.0,cost_estimation,novelty_budgeted,cost_aware_no_steal,1,-392.9266709928618,0,-392.9266709928618,-392.9266709928618,0.0004623,0.0022788,0
+1,4,4,0.0,ungated_stealing,cost_aware_no_steal,cost_aware_ungated_steal,1,1.0970686326136687,1,1.0970686326136687,1.0970686326136687,0.0022788,0.0022538,1
+1,4,4,0.0,threshold_gate,cost_aware_ungated_steal,novelty_cost_gated_steal,1,-3.1946046676723765,0,-3.1946046676723765,-3.1946046676723765,0.0022538,0.0023258,0
+1,4,4,0.0,full_vs_fine_chunks,paper_fine_grained,novelty_cost_gated_steal,1,-401.35805130416037,0,-401.35805130416037,-401.35805130416037,0.0004639,0.0023258,0
+1,4,4,0.0,full_vs_budgeted,novelty_budgeted,novelty_cost_gated_steal,1,-403.09322950465054,0,-403.09322950465054,-403.09322950465054,0.0004623,0.0023258,0
+1,4,4,0.0,full_vs_cost_aware_no_steal,cost_aware_no_steal,novelty_cost_gated_steal,1,-2.062489029313662,0,-2.062489029313662,-2.062489029313662,0.0022788,0.0023258,0
+1,4,4,0.0,full_vs_ungated_steal,cost_aware_ungated_steal,novelty_cost_gated_steal,1,-3.1946046676723765,0,-3.1946046676723765,-3.1946046676723765,0.0022538,0.0023258,0
+1,4,4,0.0,full_vs_coarse_dynamic,radix_dynamic_coarse,novelty_cost_gated_steal,1,-331.1028730305838,0,-331.1028730305838,-331.1028730305838,0.0005395,0.0023258,0
+1,4,4,0.0,full_vs_static,radix_static,novelty_cost_gated_steal,1,-340.49242424242414,0,-340.49242424242414,-340.49242424242414,0.000528,0.0023258,0
+1,4,4,0.0,full_vs_sequential,sequential_reference,novelty_cost_gated_steal,1,-258322.22222222225,0,-258322.22222222225,-258322.22222222225,9e-07,0.0023258,0

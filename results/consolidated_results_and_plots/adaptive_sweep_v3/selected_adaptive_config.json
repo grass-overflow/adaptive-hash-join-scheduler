@@ -1,0 +1,15 @@
+{
+  "chunk_size": 256,
+  "tasks_per_thread": 4,
+  "split_factor": 2.0,
+  "queue_batch_size": 1,
+  "cost_samples": 16,
+  "steal_threshold_multiplier": 4.0,
+  "min_mean_gain_vs_peer_z14_z175_pct": -0.0868464711832994,
+  "mean_gain_vs_all_peers_z14_z175_pct": 7.31426713059836,
+  "gain_z075_vs_budgeted_pct": -11.969645258499494,
+  "gain_z14_vs_budgeted_pct": -0.0868464711832994,
+  "gain_z175_vs_budgeted_pct": 0.23074293201364007,
+  "min_gain_vs_peer_z175_pct": -0.036294245771770095,
+  "seeds_per_skew": 3
+}
