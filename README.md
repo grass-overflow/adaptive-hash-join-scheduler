@@ -1,141 +1,476 @@
 # Adaptive Cost-Aware Work-Stealing Hash Join
 
-A high-performance C++17/OpenMP implementation of the hardware-conscious multi-core Radix Hash Join based on the seminal work of **Balkesen et al. (ICDE 2013)**, augmented with an **Adaptive Cost-Aware Work-Stealing Scheduler** designed for skewed database workloads.
+A C++17 and OpenMP implementation of a parallel radix hash join based on Balkesen et al. (ICDE 2013). The project implements and compares three scheduling strategies under different data distributions:
+
+- Static coarse-grained partition scheduling
+- Fine-grained dynamic scheduling
+- Cost-aware work-stealing scheduling
+
+The proposed scheduler estimates partition execution costs, selectively divides large partitions into smaller tasks, and uses per-thread deques to distribute work.
 
 ---
 
-## 1. Project Overview
+## 1. Problem Statement
 
-Modern main-memory hash joins achieve high throughput through hardware-conscious radix partitioning, cache-sized hash tables, and multi-core parallelism. However, under non-uniform key distributions (Zipfian data skew), traditional partition scheduling suffers from severe bottlenecks:
-1. **Static Coarse Partitioning (`radix_static`)**: Partitions are statically mapped round-robin to threads. At high skew ($z \ge 1.0$), heavy partitions concentrate up to 90% of all tuples, creating severe stragglers ($\lambda = 7.71$ on 8 threads) where idle cores stall at the OpenMP barrier.
-2. **Fine-Grained Dynamic Scheduling (`paper_fine_grained`)**: As proposed in Section VI-E of Balkesen et al. (ICDE 2013), oversized partitions are diced into fixed-size chunks (256 tuples) and queued into a central work pool. Under extreme skew, this explodes the task count to **15,578 tasks**, causing massive atomic lock contention that degrades the probe phase.
+Radix hash joins divide relations into smaller partitions before building and probing hash tables. This improves cache locality and allows multiple threads to process partitions in parallel.
 
-### Proposed Novelty: Cost-Aware Work-Stealing
-This project introduces a **Cost-Aware Work-Stealing Scheduler (`novelty_cost_gated_steal`)**:
-- **Analytical Cost Model**: Estimates partition execution cost $C_i = \alpha \cdot |R_i| + \beta \cdot |S_i|$ using empirical cycle-calibrated coefficients.
-- **Cost-Benefit Gated Task Bounding**: Slices only partitions where $C_i > C_{\text{avg}} + \theta$, bounding the task count to **~1,200 tasks** (a 12× reduction in task metadata overhead).
-- **Private Deques & Threshold-Gated Stealing**: Each worker executes locally from a lock-free private deque. Idle workers steal from the victim's tail only when the estimated task payoff exceeds migration overhead $\tau_{\text{steal}} = t_{\text{CAS}} + t_{\text{migration}} + k \cdot t_{\text{probe}}$.
+However, non-uniform key distributions can produce partitions of significantly different sizes. This creates load imbalance and affects overall execution time.
+
+This project studies two scheduling approaches and implements a cost-aware alternative.
+
+### Static Coarse Partitioning (`radix_static`)
+
+- Partitions are assigned to threads in a round-robin manner.
+- Each thread processes its assigned partitions.
+- Under skewed distributions, some partitions become significantly larger than others.
+- Threads assigned smaller partitions finish early and wait at the OpenMP synchronization barrier.
+
+At $z=1.75$, the measured worker imbalance ratio reaches 3.96 with 4 threads and 7.71 with 8 threads.
+
+### Fine-Grained Dynamic Scheduling (`paper_fine_grained`)
+
+- Large partitions are divided into fixed-size tasks of 256 rows.
+- Tasks are placed in a shared queue and consumed by available threads.
+- This improves load distribution but increases scheduling activity.
+
+In the extreme-skew experiments, this strategy generates approximately 15,500 tasks. Contention around the shared queue also increases scheduling overhead, with measured queue wait time exceeding 4,000 µs.
+
+### Proposed Approach: Cost-Aware Work-Stealing (`novelty_cost_gated_steal`)
+
+The proposed scheduler uses estimated partition costs to determine where additional parallelism is needed.
+
+**1. Partition cost estimation**
+
+The estimated execution cost is:
+
+$$
+C_i = \alpha |R_i| + \beta |S_i| + H(k)
+$$
+
+where:
+
+- $|R_i|$ is the build-side partition size.
+- $|S_i|$ is the probe-side partition size.
+- $\alpha$ and $\beta$ represent measured build and probe costs.
+- $H(k)$ represents task creation and scheduling overhead.
+
+**2. Selective task generation**
+
+Partitions are subdivided only when their estimated cost exceeds the average cost by a configurable threshold:
+
+$$
+C_i > C_{\text{avg}} + \theta
+$$
+
+This avoids dividing every partition into small tasks.
+
+In the extreme-skew experiments, the scheduler generates 1,036 tasks with 4 threads and 1,259 tasks with 8 threads, compared with approximately 15,500 tasks for fine-grained dynamic scheduling.
+
+**3. Per-thread work queues**
+
+Each thread maintains a private deque.
+
+- Threads process their own tasks from the tail using LIFO ordering.
+- Idle threads attempt to steal tasks from another thread's head using FIFO ordering.
+- A steal is attempted only when the estimated task payoff is sufficient to justify its scheduling cost.
+
+The stealing threshold is modelled as:
+
+$$
+\tau_{\text{steal}} =
+t_{\text{CAS}} +
+t_{\text{migration}} +
+(k \cdot t_{\text{probe}})
+$$
+
+This accounts for synchronization cost, estimated cache-transfer cost, and the expected cost of processing the stolen work.
+
+The implementation aims to balance task distribution while limiting scheduling overhead.
 
 ---
 
-## 2. Key Experimental Findings (8 Threads, Full Skew Spectrum)
+## 2. Benchmark Results
 
-Extensive benchmarking on an 8-thread SMT architecture across 7 Zipfian skew factors ($z \in [0.0, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75]$) with 3 independent seeds and 3 repeats per configuration confirms:
+The experiments compare the proposed scheduler against static coarse partitioning and fine-grained dynamic scheduling.
 
-> **Decisive Dominance Region ($z \ge 1.00$):**  
-> Past $z = 1.00$, the proposed novelty **decisively outperforms both the Static Coarse baseline and Balkesen's Fine-Grained Dynamic scheduler** across all skew points, achieving up to **+49.5% faster execution time (nearly 2× speedup)** over Static and **+23.3% faster execution time** over Fine-Grained Dynamic.
+The main benchmark uses:
 
-### 8-Thread Quantitative Summary ($|R|=250\text{k}, |S|=4\text{M}$)
+- Build relation: $|R| = 250,000$
+- Probe relation: $|S| = 4,000,000$
+- Thread counts: 4 and 8
+- Zipfian skew: $z \in [0.0, 1.75]$
 
-| Skew ($z$) | Scheduler | E2E Latency (ms) | Throughput (M/s) | Probe Time (ms) | Tasks Created | Imbalance $\lambda$ | Gain vs Static | Gain vs Dynamic |
-|:---|:---|---:|---:|---:|---:|---:|---:|---:|
-| **0.00** | Static Coarse | 30.48 | 139.43 | 9.92 | 1,024 | 1.00 | — | — |
-| | Fine-Grained Dynamic | 32.07 | 132.53 | 11.08 | 1,024 | 1.07 | -5.2% | — |
-| | **Proposed Novelty** | **25.29** | **168.07** | **8.09** | **1,024** | **1.00** | **+17.0%** | **+21.1%** |
-| **0.50** | Static Coarse | 33.12 | 128.33 | 9.57 | 1,024 | 1.05 | — | — |
-| | Fine-Grained Dynamic | 30.82 | 137.91 | 9.53 | 1,024 | 1.08 | +6.9% | — |
-| | **Proposed Novelty** | **36.78** | **115.54** | **10.59** | **1,024** | **1.06** | -11.1% | -19.3% |
-| **0.75** | Static Coarse | 33.12 | 128.31 | 10.15 | 1,024 | 1.40 | — | — |
-| | Fine-Grained Dynamic | 30.00 | 141.67 | 8.84 | 1,041 | 1.07 | +9.4% | — |
-| | **Proposed Novelty** | **30.54** | **139.14** | **9.11** | **1,032** | **1.11** | **+7.8%** | -1.8% |
-| **1.00** *(Dominance Onset)* | Static Coarse | 27.05 | 157.10 | 8.42 | 1,024 | 2.05 | — | — |
-| | Fine-Grained Dynamic | 25.57 | 166.21 | 8.52 | 1,437 | 1.08 | +5.5% | — |
-| | **Proposed Novelty** | **23.44** | **181.33** | **6.40** | **1,072** | **1.16** | **+13.3%** | **+8.3%** |
-| **1.25** | Static Coarse | 44.03 | 96.53 | 11.23 | 1,024 | 4.39 | — | — |
-| | Fine-Grained Dynamic | 25.45 | 167.01 | 8.28 | 5,595 | 1.07 | +42.2% | — |
-| | **Proposed Novelty** | **22.25** | **191.02** | **5.45** | **1,197** | **1.33** | **+49.5%** | **+12.6%** |
-| **1.50** | Static Coarse | 31.65 | 134.28 | 9.98 | 1,024 | 6.81 | — | — |
-| | Fine-Grained Dynamic | 29.99 | 141.72 | 10.37 | 12,835 | 1.07 | +5.2% | — |
-| | **Proposed Novelty** | **24.83** | **171.18** | **5.27** | **1,259** | **1.48** | **+21.6%** | **+17.2%** |
-| **1.75** | Static Coarse | 27.60 | 154.00 | 10.51 | 1,024 | 7.71 | — | — |
-| | Fine-Grained Dynamic | 28.46 | 149.33 | 10.86 | 15,578 | 1.07 | -3.1% | — |
-| | **Proposed Novelty** | **21.82** | **194.75** | **4.74** | **1,259** | **1.54** | **+20.9%** | **+23.3%** |
+### 2.1 Key Experimental Observations
+
+| Metric | Proposed Cost-Aware | Static Coarse | Fine-Grained Dynamic |
+|:---|---:|---:|---:|
+| Throughput at $z=1.40$, 4T | **173.03 M/s** | 142.22 M/s | 138.22 M/s |
+| Throughput at $z=1.75$, 4T | **176.06 M/s** | 138.64 M/s | 146.94 M/s |
+| Throughput at $z=1.75$, 8T | **194.75 M/s** | 154.00 M/s | 149.33 M/s |
+| E2E latency at $z=1.75$, 8T | **21.82 ms** | 27.60 ms | 28.46 ms |
+| Probe duration at $z=1.75$, 4T | **3.66 ms** | 10.52 ms | 8.25 ms |
+| Worker imbalance at $z=1.75$, 4T | **1.25** | 3.96 | 1.06 |
+| Worker imbalance at $z=1.75$, 8T | **1.54** | 7.71 | 1.07 |
+| Tasks at $z=1.75$, 4T | **1,036** | 1,024 | 15,498 |
+| Tasks at $z=1.75$, 8T | **1,259** | 1,024 | 15,578 |
+| Parallel efficiency at $z=1.40$ | **59.0%** | 46.1% | 46.2% |
+| Scheduling overhead | **245 µs** | 0 µs | >4,000 µs queue wait |
+
+The proposed scheduler performs better in the higher-skew configurations, particularly during the probe phase. At lower skew, its additional scheduling logic does not always provide a benefit.
+
+### 2.2 Eight-Thread Benchmark
+
+The following results were obtained using $|R|=250,000$ and $|S|=4,000,000$.
+
+The benchmark covers seven skew values, with three independent seeds and three repetitions per configuration (63 join runs per scheduler).
+
+| Skew $z$ | Scheduler | E2E Latency (ms) | Throughput (M/s) | Probe Time (ms) | Tasks | Imbalance $\lambda$ |
+|:---:|:---|---:|---:|---:|---:|---:|
+| **0.00** | Static Coarse | 30.48 | 139.43 | 9.92 | 1,024 | 1.00 |
+| | Fine-Grained Dyn | 32.07 | 132.53 | 11.08 | 1,024 | 1.07 |
+| | **Proposed** | **25.29** | **168.07** | **8.09** | **1,024** | **1.00** |
+| **0.50** | Static Coarse | 33.12 | 128.33 | 9.57 | 1,024 | 1.05 |
+| | Fine-Grained Dyn | 30.82 | 137.91 | 9.53 | 1,024 | 1.08 |
+| | **Proposed** | **36.78** | **115.54** | **10.59** | **1,024** | **1.06** |
+| **0.75** | Static Coarse | 33.12 | 128.31 | 10.15 | 1,024 | 1.40 |
+| | Fine-Grained Dyn | 30.00 | 141.67 | 8.84 | 1,041 | 1.07 |
+| | **Proposed** | **30.54** | **139.14** | **9.11** | **1,032** | **1.11** |
+| **1.00** | Static Coarse | 27.05 | 157.10 | 8.42 | 1,024 | 2.05 |
+| | Fine-Grained Dyn | 25.57 | 166.21 | 8.52 | 1,437 | 1.08 |
+| | **Proposed** | **23.44** | **181.33** | **6.40** | **1,072** | **1.16** |
+| **1.25** | Static Coarse | 44.03 | 96.53 | 11.23 | 1,024 | 4.39 |
+| | Fine-Grained Dyn | 25.45 | 167.01 | 8.28 | 5,595 | 1.07 |
+| | **Proposed** | **22.25** | **191.02** | **5.45** | **1,197** | **1.33** |
+| **1.50** | Static Coarse | 31.65 | 134.28 | 9.98 | 1,024 | 6.81 |
+| | Fine-Grained Dyn | 29.99 | 141.72 | 10.37 | 12,835 | 1.07 |
+| | **Proposed** | **24.83** | **171.18** | **5.27** | **1,259** | **1.48** |
+| **1.75** | Static Coarse | 27.60 | 154.00 | 10.51 | 1,024 | 7.71 |
+| | Fine-Grained Dyn | 28.46 | 149.33 | 10.86 | 15,578 | 1.07 |
+| | **Proposed** | **21.82** | **194.75** | **4.74** | **1,259** | **1.54** |
+
+#### Throughput improvement over static scheduling
+
+| Skew | Improvement |
+|:---:|---:|
+| 0.00 | +17.0% |
+| 0.50 | -11.1% |
+| 0.75 | +7.8% |
+| 1.00 | +13.3% |
+| 1.25 | +49.5% |
+| 1.50 | +21.6% |
+| 1.75 | +20.9% |
+
+The results show that the cost-aware approach becomes more useful as partition sizes become increasingly uneven. At $z=0.5$, the additional scheduling work outweighs its benefits.
+
+### 2.3 Four-Thread Benchmark
+
+The following experiments use the same relation sizes and skew configurations.
+
+| Skew $z$ | Scheduler | E2E Latency (ms) | Throughput (M/s) | Probe Time (ms) | Tasks | Imbalance $\lambda$ |
+|:---:|:---|---:|---:|---:|---:|---:|
+| **0.00** | Static Coarse | 33.30 | 127.63 | 10.13 | 1,024 | 1.00 |
+| | Fine-Grained Dyn | 31.90 | 133.22 | 9.53 | 1,024 | 1.04 |
+| | **Proposed** | **32.45** | **130.98** | **10.21** | **1,024** | **1.00** |
+| **0.75** | Static Coarse | 30.24 | 140.55 | 10.25 | 1,024 | 1.39 |
+| | Fine-Grained Dyn | 28.71 | 148.03 | 8.52 | 1,782 | 1.08 |
+| | **Proposed** | **28.87** | **147.22** | **8.62** | **1,036** | **1.09** |
+| **1.40** | Static Coarse | 29.88 | 142.22 | 9.55 | 1,024 | 3.72 |
+| | Fine-Grained Dyn | 30.75 | 138.22 | 10.25 | 13,483 | 1.06 |
+| | **Proposed** | **24.56** | **173.03** | **4.07** | **1,036** | **1.27** |
+| **1.75** | Static Coarse | 30.66 | 138.64 | 10.52 | 1,024 | 3.96 |
+| | Fine-Grained Dyn | 28.92 | 146.94 | 8.25 | 15,498 | 1.06 |
+| | **Proposed** | **24.14** | **176.06** | **3.66** | **1,036** | **1.25** |
+
+#### Throughput improvement over static scheduling
+
+| Skew | Improvement |
+|:---:|---:|
+| 0.00 | +2.6% |
+| 0.75 | +4.5% |
+| 1.40 | +21.7% |
+| 1.75 | +27.0% |
+
+The four-thread results show a similar pattern. The largest improvements occur at higher skew values, where static partition assignment produces more uneven workloads.
+
+### 2.4 Confirmatory Evaluation at Extreme Skew
+
+An additional evaluation was conducted at $z=1.75$ using eight independent pseudorandom seeds. Each scheduler was evaluated over 56 runs. The reported values are mean latency and standard deviation.
+
+**Large workload: $|R|=250,000$, $|S|=4,000,000$**
+
+| Scheduler | E2E Latency |
+|:---|---:|
+| **Proposed Cost-Aware** | **32.18 ± 1.72 ms** |
+| Fine-Grained Dynamic | 38.75 ± 1.98 ms |
+| Static Coarse | 40.27 ± 2.84 ms |
+
+The proposed scheduler had the lowest mean latency in all eight seed-level comparisons.
+
+**Small workload: $|R|=20,000$, $|S|=320,000$**
+
+| Scheduler | E2E Latency |
+|:---|---:|
+| **Proposed Cost-Aware** | **4.28 ± 0.80 ms** |
+| Fine-Grained Dynamic | 4.63 ± 1.07 ms |
+| Static Coarse | 4.70 ± 0.89 ms |
+
+The difference is smaller for the small workload, where scheduling overhead represents a larger proportion of execution time.
+
+### 2.5 Phase Breakdown at Extreme Skew
+
+At $z=1.75$, the main benchmark records the following phase timings:
+
+| Execution Phase | Duration |
+|:---|---:|
+| Two-pass radix partitioning | 18.30 ms |
+| Hash table build | 1.68 ms |
+
+These phases take approximately the same time across the three schedulers.
+
+The main difference is observed in the probe phase:
+
+| Scheduler | Probe Duration |
+|:---|---:|
+| **Proposed Cost-Aware (4T)** | **3.66 ms** |
+| Fine-Grained Dynamic (4T) | 8.25 ms |
+| Static Coarse (4T) | 10.52 ms |
+
+This indicates that most of the measured improvement comes from distributing probe work more effectively.
 
 ---
 
-## 3. Academic Publication Figures
+## 3. Cost Model Calibration
 
-Standard IEEE/ACM/VLDB academic figures are located in [`results/academic_plots/`](./results/academic_plots/):
-- **Figure 1 (`fig1_throughput_and_latency_8threads.png`)**: 4-panel Throughput, Cycles/Tuple, Latency, and Relative Gain showing the shaded dominance region ($z \ge 1.00$).
-- **Figure 2 (`fig2_speedup_and_imbalance_8threads.png`)**: Speedup vs. Sequential Baseline and Worker Load Imbalance ($\lambda$).
-- **Figure 3 (`fig3_task_granularity_and_probe_8threads.png`)**: Task count explosion (15,578 vs. 1,259 tasks) and Probe Phase Latency.
-- **Figure 4 (`fig4_4threads_vs_8threads_comparison.png`)**: Multi-core scaling comparison (4 threads vs. 8 threads).
-- **Figure 5 (`fig5_8thread_confirmation_bar.png`)**: Hatched confirmatory bar chart with standard deviation error bars at $z=1.75$.
-- **Figure 6 (`fig6_8thread_worker_distribution.png`)**: Worker tuple load distribution comparing Static stragglers against Novelty load balance.
+The scheduler uses measured parameters to estimate partition processing and scheduling costs.
+
+| Parameter | Description | Measured Value | Calibration Source |
+|:---|:---|---:|:---|
+| $\alpha$ | Build insertion latency | ≈ 9.25 ns/row | Build time divided by build relation size |
+| $\beta$ | Probe lookup latency | ≈ 6.27 ns/row | Sampled probe lookup times |
+| $H(k)$ | Task creation and enqueue overhead | ≈ 180 ns | Microbenchmark of 4,096 deque operations |
+| $t_{\text{CAS}}$ | Uncontended atomic spinlock cost | ≈ 7.9–34.9 ns | Five repetitions of 4,096 lock acquisitions |
+| $t_{\text{migration}}$ | Cross-core cache transfer estimate | ≈ 26.9–35.2 ns | Contended two-worker timing delta minus uncontended CAS cost |
+| $\tau_{\text{steal}}$ | Stealing threshold | ≈ 39.0–70.9 ns | Calculated using the stealing cost model |
+| Task budget cap | Maximum sliced task budget | 1,259 tasks | Thread count × tasks per thread × 4 |
+
+The build and probe parameters are estimated from measured execution times. The synchronization and migration parameters are obtained from separate microbenchmarks.
+
+The stealing threshold is calculated as:
+
+$$
+\tau_{\text{steal}} =
+t_{\text{CAS}} +
+t_{\text{migration}} +
+(k \cdot t_{\text{probe}})
+$$
+
+These values are used by the scheduler to decide whether stealing is worthwhile.
 
 ---
 
-## 4. Build and Testing Instructions
+## 4. Build and Quickstart
 
 ### Prerequisites
-- Modern C++17 compiler (GCC 9+ or Clang 10+ with OpenMP support)
-- Python 3.8+ with `matplotlib` and `numpy` (for benchmark harness and plotting)
+
+- C++17 compiler (GCC 9+ or Clang 10+ with OpenMP support)
+- Python 3.8+
+- Python packages:
+  - pandas
+  - numpy
+  - matplotlib
 
 ### Compilation
-Build the optimized executable using strict warnings and OpenMP:
-```powershell
-g++ -O3 -std=c++17 -Wall -Wextra -Wpedantic -Werror -fopenmp src\main.cpp -o hashjoin.exe
+
+Compile the main program:
+
+```bash
+g++ -O3 -std=c++17 -Wall -Wextra -Wpedantic -fopenmp src/main.cpp -o hashjoin.exe
 ```
 
-### Self-Test & Correctness Suite
-Verify execution correctness across all corner cases (empty tables, duplicates, extreme skew, 1/2/4/8 threads, concurrent joins):
-```powershell
-.\hashjoin.exe --self-test
+Alternatively, use the Makefile:
+
+```bash
+make
 ```
 
-### Run a Single Benchmark
-```powershell
-.\hashjoin.exe --benchmark --r-size 250000 --s-size 4000000 --skew 1.75 --threads 8 --repeats 3
+### Correctness Self-Test
+
+Run the built-in test suite:
+
+```bash
+./hashjoin.exe --self-test
+```
+
+The tests cover:
+
+- Empty relations
+- Single-element relations
+- Duplicate keys
+- Highly skewed distributions
+- Concurrent execution
+- Hash join result verification against a reference implementation
+
+### CLI Options
+
+```text
+Usage: hashjoin [options]
+
+  --r-size R             Build relation rows (default: 100000)
+  --s-size S             Probe relation rows (default: 1600000; 16x R)
+  --key-range K          Zipf domain (default: R size)
+  --partitions P         Partition count (power of 2 with even log2, e.g. 1024)
+  --threads T            OpenMP thread count (default: 4)
+  --chunk-size C         Fixed chunk size for paper baseline (default: 256)
+  --tasks-per-thread K   Task budget multiplier for novelty (default: 32)
+  --cost-samples N       Probe samples per partition (default: 16)
+  --repeats R            Measured repetitions per configuration (default: 3)
+  --skews z1,z2,...      Zipf skew exponents (default: 0,0.75,1.25)
+  --csv PATH             Output CSV path (default: results.csv)
+  --self-test            Run built-in validation tests
+```
+
+Example:
+
+```bash
+./hashjoin.exe --r-size 250000 --s-size 4000000 --threads 8 --skews 0,0.5,0.75,1.0,1.25,1.5,1.75 --repeats 3
 ```
 
 ---
 
-## 5. Experiment Reproduction
+## 5. Benchmark and Analysis Scripts
 
-To rerun the full skew benchmarks and regenerate the publication plots:
+The `scripts/` directory contains utilities for running benchmarks, analysing results, and generating figures.
 
-```powershell
-# 1. Run the 8-thread full skew benchmark (z in 0.0, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75)
-python scripts\run_8thread_grid.py
+### Main demonstration
 
-# 2. Run the 4-thread full skew benchmark
-python scripts\run_full_skew_benchmark.py
-
-# 3. Generate all academic publication figures
-python scripts\generate_academic_plots.py
+```bash
+python scripts/run_complete_demo.py
 ```
+
+Runs the self-tests and the multi-core benchmark across the configured skew values. It also prints comparative performance tables.
+
+### Eight-thread benchmark
+
+```bash
+python scripts/run_8threads_all_skews.py
+```
+
+Runs the eight-thread benchmark using $|R|=250,000$ and $|S|=4,000,000$ across seven skew values.
+
+### Generate benchmark summary
+
+```bash
+python scripts/generate_complete_summary.py
+```
+
+Prints execution phase timings, worker imbalance, and scheduling statistics.
+
+### Cost model estimation
+
+```bash
+python scripts/offline_linear_regression_cost_model.py
+```
+
+Uses Ordinary Least Squares (OLS) regression to estimate the build and probe cost parameters from partition measurements.
+
+### Generate publication figures
+
+```bash
+python scripts/plots/generate_academic_plots.py
+```
+
+Generates the benchmark figures in `results/plots/`.
 
 ---
 
-## 6. Repository Structure
+## 6. Generated Figures
+
+The benchmark scripts generate the following figures in `results/plots/`:
+
+| Figure | File | Description |
+|:---|:---|:---|
+| Figure 1 | `fig1_throughput_and_latency_8threads.png` | Throughput, cycles per tuple, latency, and relative performance |
+| Figure 2 | `fig2_speedup_and_imbalance_8threads.png` | Speedup and worker load imbalance |
+| Figure 3 | `fig3_task_granularity_and_probe_8threads.png` | Task counts and probe phase duration |
+| Figure 4 | `fig4_4threads_vs_8threads_comparison.png` | Comparison between four-thread and eight-thread execution |
+| Figure 5 | `fig5_8thread_confirmation_bar.png` | Confirmatory evaluation with standard deviation error bars |
+| Figure 6 | `fig6_8thread_worker_distribution.png` | Per-thread work distribution for static and proposed scheduling |
+
+---
+
+## 7. Repository Structure
 
 ```text
 ├── src/
-│   └── main.cpp                  # Complete C++17 Radix Hash Join engine & all schedulers
+│   └── main.cpp
+│       # Radix hash join implementation, cost model and schedulers
+│
 ├── scripts/
-│   ├── run_8thread_grid.py       # 8-Thread benchmark harness across 7-skew spectrum
-│   ├── run_full_skew_benchmark.py# 4-Thread benchmark harness across 7-skew spectrum
-│   ├── generate_academic_plots.py# Publication-grade academic plot generator
-│   ├── create_three_scheduler_comparison.py # Statistical report generator
-│   ├── analyze_experiments.py    # Experiment analysis, bootstrap CIs, ANOVA
-│   └── run_validation.ps1        # Fast correctness validation runner
+│   ├── run_complete_demo.py
+│   │   # End-to-end benchmark and validation
+│   │
+│   ├── run_8threads_all_skews.py
+│   │   # Eight-thread benchmark across seven skew values
+│   │
+│   ├── generate_complete_summary.py
+│   │   # Execution phase and imbalance summary
+│   │
+│   ├── explain_novelty_performance.py
+│   │   # Comparative performance analysis
+│   │
+│   ├── offline_linear_regression_cost_model.py
+│   │   # OLS estimation of cost model parameters
+│   │
+│   └── plots/
+│       ├── generate_academic_plots.py
+│       ├── create_three_scheduler_comparison.py
+│       ├── analyze_experiments.py
+│       └── run_full_skew_benchmark.py
+│
 ├── results/
-│   ├── academic_plots/           # Generated IEEE/ACM publication figures
-│   ├── grid_8threads/            # 8-Thread full skew benchmark raw CSVs and analysis
-│   ├── full_skew_grid/           # 4-Thread full skew benchmark raw CSVs and analysis
-│   ├── adaptive_linear_cost_final_grid/ # Multi-workload 4-thread grid dataset
-│   ├── adaptive_linear_cost_final_z175/ # Confirmatory 8-seed large skew dataset
-│   └── consolidated_results_and_plots/  # Consolidated datasets and historical archives
+│   ├── plots/
+│   │   # Generated benchmark figures
+│   │
+│   ├── grid_8threads/
+│   │   # Eight-thread benchmark measurements
+│   │
+│   ├── consolidated/
+│   │   # Confirmatory multi-seed datasets
+│   │
+│   └── run_8threads_all_skews.csv
+│       # Aggregate benchmark results
+│
 ├── tests/
-│   └── smoke.ps1                 # Smoke test suite
-├── Makefile                      # Standard build automation
-├── FINAL_REPORT.md               # Exhaustive academic report & technical thesis
-├── ARTIFACT_MANIFEST.md          # Detailed manifest of all source artifacts
-└── README.md                     # This file
+│   └── smoke.ps1
+│       # PowerShell smoke test
+│
+├── Makefile
+│
+└── README.md
 ```
 
 ---
 
-## 7. Reference
+## 8. Reference
 
-- **C. Balkesen, J. Teubner, G. Alonso, and M. Tamer Özsu**, *“Main-Memory Hash Joins on Multi-Core CPUs: Tuning to the Underlying Hardware,”* IEEE International Conference on Data Engineering (**ICDE 2013**), [DOI: 10.1109/ICDE.2013.6544839](https://doi.org/10.1109/ICDE.2013.6544839).
+C. Balkesen, J. Teubner, G. Alonso, and M. Tamer Özsu, "Main-Memory Hash Joins on Multi-Core CPUs: Tuning to the Underlying Hardware," IEEE International Conference on Data Engineering (ICDE), 2013.
+
+DOI: [10.1109/ICDE.2013.6544839](https://doi.org/10.1109/ICDE.2013.6544839)
+
+---
+
+## 9. Summary
+
+This project implements and evaluates three scheduling strategies for parallel radix hash joins.
+
+The proposed cost-aware scheduler uses partition cost estimates, selective task generation, and per-thread work-stealing queues.
+
+The experiments show that:
+
+- Static scheduling can suffer from load imbalance under highly skewed workloads.
+- Fine-grained scheduling improves load distribution but can generate a large number of tasks.
+- Cost-aware scheduling reduces task generation compared with fixed-size slicing.
+- The proposed approach improves probe performance in the higher-skew configurations evaluated.
+- At lower skew, the additional scheduling overhead can offset the benefits.
+
+The implementation compares these approaches using execution time, throughput, task count, worker imbalance, and scheduling overhead.
