@@ -268,47 +268,83 @@ These values are used by the scheduler to decide whether stealing is worthwhile.
 
 ---
 
-## 4. Build and Quickstart
+## 4. Platform, Build, and Getting Started
+
+### Target Platforms & Environment
+
+- **Evaluated & Tested On**: Windows 11 (x86_64), using MinGW-w64 GCC (v13.x/v14.x) with OpenMP and Python 3.11.
+- **Ubuntu / Linux Support**: **Yes, fully supported**. The C++ engine (`src/main.cpp`) uses standard ISO C++17 and standard OpenMP (`-fopenmp`) without any Windows-specific APIs or system headers. It compiles and runs out-of-the-box on Ubuntu (20.04, 22.04, 24.04).
 
 ### Prerequisites
 
 - C++17 compiler (GCC 9+ or Clang 10+ with OpenMP support)
-- Python 3.8+
-- Python packages:
-  - pandas
-  - numpy
-  - matplotlib
+- Python 3.8+ with `pandas`, `numpy`, and `matplotlib` (for running benchmarks and plotting)
 
-### Compilation
+---
 
-Compile the main program:
+### Getting Started
+
+#### On Ubuntu / Debian:
 
 ```bash
-g++ -O3 -std=c++17 -Wall -Wextra -Wpedantic -fopenmp src/main.cpp -o hashjoin.exe
-```
+# 1. Install compiler and dependencies
+sudo apt update
+sudo apt install -y build-essential g++ libomp-dev python3 python3-pip
+pip3 install pandas numpy matplotlib
 
-Alternatively, use the Makefile:
-
-```bash
+# 2. Build executable
 make
+# Or compile directly:
+g++ -O3 -std=c++17 -Wall -Wextra -Wpedantic -fopenmp src/main.cpp -o hashjoin
+
+# 3. Run self-test
+./hashjoin --self-test
 ```
 
-### Correctness Self-Test
+#### On Windows (MinGW-w64 / MSYS2 / PowerShell):
 
-Run the built-in test suite:
+```powershell
+# 1. Compile executable
+g++ -O3 -std=c++17 -Wall -Wextra -Wpedantic -fopenmp src\main.cpp -o hashjoin.exe
 
-```bash
-./hashjoin.exe --self-test
+# 2. Run self-test
+.\hashjoin.exe --self-test
 ```
 
-The tests cover:
+---
 
-- Empty relations
-- Single-element relations
-- Duplicate keys
-- Highly skewed distributions
-- Concurrent execution
-- Hash join result verification against a reference implementation
+### How to Test This Project
+
+Testing is divided into three tiers:
+
+1. **Automated Correctness & Concurrency Self-Test (`--self-test`)**:
+   Runs the built-in test suite verifying:
+   - Empty relations ($|R|=0, |S|=0$)
+   - Single-element relations ($|R|=1, |S|=1$)
+   - Duplicate key handling
+   - Extreme Zipf skew handling
+   - Multi-threaded OpenMP concurrency
+   - Join verification against a sequential reference hash join oracle (ensures identical tuple match counts)
+
+   ```bash
+   ./hashjoin --self-test      # Linux
+   .\hashjoin.exe --self-test  # Windows
+   ```
+
+2. **Automated Smoke Test Suite (`tests/smoke.ps1`)**:
+   Compiles a fresh binary in a temporary directory, runs `--self-test`, executes a 4-thread grid across 4 skew values ($z \in [0.0, 0.9, 1.4, 1.75]$), and verifies that all parallel outputs match the sequential oracle across all runs.
+   ```powershell
+   pwsh -File tests/smoke.ps1
+   ```
+
+3. **End-to-End Live Benchmark**:
+   Runs the full suite across 7 skew points ($z \in [0.0, 1.75]$) and prints comparative speedup tables:
+   ```bash
+   python3 scripts/run_complete_demo.py    # Linux
+   python scripts\run_complete_demo.py     # Windows
+   ```
+
+---
 
 ### CLI Options
 
@@ -329,10 +365,14 @@ Usage: hashjoin [options]
   --self-test            Run built-in validation tests
 ```
 
-Example:
+Manual execution example:
 
 ```bash
-./hashjoin.exe --r-size 250000 --s-size 4000000 --threads 8 --skews 0,0.5,0.75,1.0,1.25,1.5,1.75 --repeats 3
+# Linux
+./hashjoin --r-size 250000 --s-size 4000000 --threads 8 --skews 0,0.5,0.75,1.0,1.25,1.5,1.75 --repeats 3
+
+# Windows
+.\hashjoin.exe --r-size 250000 --s-size 4000000 --threads 8 --skews 0,0.5,0.75,1.0,1.25,1.5,1.75 --repeats 3
 ```
 
 ---
@@ -402,51 +442,45 @@ The benchmark scripts generate the following figures in `results/plots/`:
 
 ```text
 ├── src/
-│   └── main.cpp
-│       # Radix hash join implementation, cost model and schedulers
+│   └── main.cpp                                # Core C++17 Radix Hash Join engine, cost model, & schedulers
 │
 ├── scripts/
-│   ├── run_complete_demo.py
-│   │   # End-to-end benchmark and validation
+│   ├── Benchmark & Evaluation Runners:
+│   │   ├── run_complete_demo.py                # Master end-to-end benchmark and validation suite
+│   │   ├── run_8threads_all_skews.py           # Dedicated 8-thread benchmark across all 7 skews
+│   │   ├── generate_complete_summary.py        # Extracts phase latency breakdowns & imbalance metrics
+│   │   ├── explain_novelty_performance.py      # Quantitative comparison table generator
+│   │   └── offline_linear_regression_cost_model.py # OLS regression script estimating alpha and beta
 │   │
-│   ├── run_8threads_all_skews.py
-│   │   # Eight-thread benchmark across seven skew values
+│   ├── Microbenchmarks & Hardware Calibration (C++):
+│   │   ├── full_scheduler_benchmark.cpp        # Standalone multi-scheduler timing harness
+│   │   ├── measure_hk.cpp                      # Microbenchmark measuring task enqueue cost H(k)
+│   │   ├── steal_benchmark_windows.cpp         # Measures atomic CAS and cross-core migration latency
+│   │   ├── steal_cost.cpp                      # Stealing threshold calibration microbenchmark
+│   │   └── task_overhead.cpp                   # Deque task creation overhead microbenchmark
 │   │
-│   ├── generate_complete_summary.py
-│   │   # Execution phase and imbalance summary
-│   │
-│   ├── explain_novelty_performance.py
-│   │   # Comparative performance analysis
-│   │
-│   ├── offline_linear_regression_cost_model.py
-│   │   # OLS estimation of cost model parameters
-│   │
-│   └── plots/
-│       ├── generate_academic_plots.py
-│       ├── create_three_scheduler_comparison.py
-│       ├── analyze_experiments.py
-│       └── run_full_skew_benchmark.py
+│   └── plots/                                  # Plotting and grid evaluation scripts
+│       ├── generate_academic_plots.py          # Publication-ready figure generator (Figures 1 to 6)
+│       ├── create_three_scheduler_comparison.py# Generates 3-way scheduler comparative plots
+│       ├── analyze_experiments.py              # Analyzes raw benchmark CSVs into aggregated metrics
+│       ├── analyze_validation.py               # Statistical multi-seed variance & confidence intervals
+│       ├── run_8thread_grid.py                 # Multi-core 8-thread parameter sweep runner
+│       ├── run_full_skew_benchmark.py          # Full skew spectrum automation script
+│       ├── run_validation.ps1                  # PowerShell runner for validation suite
+│       └── run_validation.sh                   # Bash runner for validation suite
 │
 ├── results/
-│   ├── plots/
-│   │   # Generated benchmark figures
-│   │
-│   ├── grid_8threads/
-│   │   # Eight-thread benchmark measurements
-│   │
-│   ├── consolidated/
-│   │   # Confirmatory multi-seed datasets
-│   │
-│   └── run_8threads_all_skews.csv
-│       # Aggregate benchmark results
+│   ├── plots/                                  # Generated publication figures (Figures 1 through 6)
+│   ├── grid_8threads/                          # 8-thread raw and aggregated benchmark measurements
+│   ├── consolidated/                           # Confirmatory 8-seed benchmark datasets (z=1.75)
+│   ├── live_run_summary.csv                    # Latest benchmark run summary
+│   └── run_8threads_all_skews.csv              # Full spectrum benchmark results
 │
 ├── tests/
-│   └── smoke.ps1
-│       # PowerShell smoke test
+│   └── smoke.ps1                               # Automated end-to-end PowerShell smoke test
 │
-├── Makefile
-│
-└── README.md
+├── Makefile                                    # Compilation targets (all, smoke, confirm, clean)
+└── README.md                                   # Project documentation
 ```
 
 ---
